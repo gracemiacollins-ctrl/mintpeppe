@@ -1,0 +1,41 @@
+# Render Blueprint for frontend (Vite) + backend (Express in /server)
+services:
+  - type: web
+    name: reown-multi-deposit-app
+    env: static
+    plan: free
+    buildCommand: |
+      npm ci || npm ci --registry=https://registry.npmmirror.com
+      npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: "/*"
+        destination: /index.html
+    envVars:
+      - key: NODE_VERSION
+        value: 18.20.3
+      - key: VITE_REOWN_PROJECT_ID
+        sync: false
+      - key: VITE_NOTIFY_URL
+        sync: false
+
+  - type: web
+    name: tx-notify
+    env: node
+    plan: free
+    rootDir: server
+    buildCommand: |
+      npm ci || npm ci --registry=https://registry.npmmirror.com
+    startCommand: node index.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 18.20.3
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: ALLOWED_ORIGIN
+        value: https://REPLACE_WITH_STATIC_URL
