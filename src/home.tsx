@@ -423,7 +423,7 @@ const Home: React.FC = () => {
 
               <div className="mt-4 text-center">
                 <p className="text-sm text-blue-300/80 mb-4 leading-relaxed">
-                  Watch Jolof in action: Real-time meme token sniping with
+                  Watch peppermint in action: Real-time meme token sniping with
                   lightning-fast execution
                 </p>
                 <a
