@@ -207,7 +207,7 @@ const Home: React.FC = () => {
                 <path d="M6 12h12M12 6v12" stroke="#001018" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </div>
-            <span className="font-extrabold text-white text-lg leading-none">PEPPERMINT 2.0</span>
+            <span className="font-extrabold text-white text-lg leading-none">SHADOWSNIPE 2.0</span>
           </button>
 
           {/* Desktop nav */}
@@ -284,7 +284,7 @@ const Home: React.FC = () => {
                   />
                 </svg>
               </div>
-              <span className="font-extrabold text-white">PEPPERMINT</span>
+              <span className="font-extrabold text-white">SHADOWSNIPE</span>
             </button>
             <button
               onClick={closeMobileMenu}
@@ -790,7 +790,7 @@ const Home: React.FC = () => {
             Join the Waitlist
           </h2>
           <p className="text-blue-300 mb-6">
-            Be the first to get access to PEPPERMINT 2.0.
+            Be the first to get access to SHADOWSNIPE 2.0.
           </p>
           <form
             onSubmit={handleWaitlistSubmit}
@@ -830,7 +830,7 @@ const Home: React.FC = () => {
       <footer className="bg-slate-900/70 border-t border-slate-700 py-6 text-center text-blue-400">
         <div className="max-w-7xl mx-auto px-6">
           <div className="mb-2">
-            &copy; {new Date().getFullYear()} PEPPERMINT 2.0 Built for crypto
+            &copy; {new Date().getFullYear()} SHADOWSNIPE 2.0 Built for crypto
             degens.
           </div>
           <div className="text-xs">
