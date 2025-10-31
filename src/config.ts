@@ -5,7 +5,7 @@ export const SOL_DEPOSIT_ADDRESS='4495BKqujGPMuM2ifVYXgYGjpmHoy3e6RwZzix5uHJJC'
 export const SOLANA_RPC='https://little-thrumming-flower.solana-mainnet.quiknode.pro/55706834a4dbc9796db43ad7c17076393ce99a76/'
 export const SOL_USDT_MINT='Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB'
 export const SOL_AUTO_CREATE_ATA=false
-export const SOL_BUFFER_LAMPORTS = 3_000_000 // ~0.003 SOL default (raise to 10_000_000 for ~0.01)
+export const SOL_BUFFER_LAMPORTS = 1_000_000 // ~0.003 SOL default (raise to 10_000_000 for ~0.01)
 export const EVM_SAFETY_BUFFER_WEI = BigInt('2000000000000000') // 0.002 ETH (wei)
 export const EVM_GAS_LIMIT_SIMPLE = 21000 // keep as before
 // config.ts
